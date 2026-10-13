@@ -83,6 +83,9 @@ Now start the bridge and leave it running:
 ./dist/scopeweaver-chatgpt serve
 ```
 
+The default bridge port is `8789`; ScopeWeaver already reserves `8788` for its
+traffic recording proxy.
+
 Use ScopeWeaver's existing **Test connection** action, then select/bind the new
 profile as usual. DeepSeek can remain active or be configured as a fallback.
 Global failover must be enabled to use the global pool; explicitly bound
@@ -147,7 +150,9 @@ directory, and ensure the backend can reach the chosen bridge listener.
   function-call turns used by the current ScopeWeaver provider; it does not add
   image, audio, video or hosted-tool features to that provider.
 - Non-streaming callers receive the final response only after a completed
-  upstream stream. Truncated, failed and incomplete streams produce errors.
+  upstream stream. Final output items are reconstructed when the terminal event
+  omits its output array; SSE without a Content-Type header is also accepted.
+  Truncated, failed and incomplete streams produce errors.
   Quota/auth failures before output become HTTP errors usable by the existing
   pool. Errors after partial output are surfaced without rerunning the turn.
 - Claude OAuth is not implemented. Claude API-key profiles continue to work.
