@@ -263,3 +263,31 @@ func TestUnsupportedRequestsDoNotReachOpenAI(t *testing.T) {
 		t.Fatal("unsupported request reached OpenAI")
 	}
 }
+
+func TestPlanEndpointMayOmitEventStreamContentType(t *testing.T) {
+	_, s := bridgeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		// Explicit nil suppresses net/http's automatic Content-Type detection.
+		w.Header()["Content-Type"] = nil
+		fmt.Fprintf(w, "data: %s\n\n", completedText)
+	})
+	p := providerForBridge(t, s.URL)
+	msg, _, _, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("test")}})
+	if err != nil || msg.Text() != "OK" {
+		t.Fatalf("valid SSE without Content-Type rejected: %v", err)
+	}
+}
+
+func TestLeanCompletedResponseReconstructsFinalOutput(t *testing.T) {
+	_, s := bridgeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		streamFrames(w,
+			`{"type":"response.output_text.delta","delta":"OK"}`,
+			`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call-1","name":"lab_info","arguments":"{}","namespace":"scopeweaver"}}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}}`,
+			`{"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":12,"output_tokens":4}}}`)
+	})
+	p := providerForBridge(t, s.URL)
+	msg, _, usage, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("test")}})
+	if err != nil || msg.Text() != "OK" || len(msg.ToolUses()) != 1 || msg.ToolUses()[0].ID != "call-1" || usage.OutputTokens != 4 || msg.Content[0].Type != llm.BlockText {
+		t.Fatalf("lean final response lost output/order/usage: %+v %v", msg, err)
+	}
+}

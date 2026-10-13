@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string) (result error) {
 	dir := f.String("directory", root, "Private credential directory / 비공개 자격 증명 디렉터리")
 	account := f.String("account", "default", "Saved account label / 저장된 계정 이름")
 	lang := f.String("lang", "en", "Language: en or ko / 언어: en 또는 ko")
-	listen := f.String("listen", "127.0.0.1:8788", "Loopback bridge address / 루프백 브리지 주소")
+	listen := f.String("listen", "127.0.0.1:8789", "Loopback bridge address / 루프백 브리지 주소")
 	callback := f.String("callback-listen", "127.0.0.1:1455", "OAuth loopback listener / OAuth 루프백 리스너")
 	model := f.String("model", "", "Account model slug from models / models에서 확인한 계정 모델 slug")
 	if err := f.Parse(args[1:]); err != nil {

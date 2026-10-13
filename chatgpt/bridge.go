@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -329,7 +330,9 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 		forwardHTTPError(w, resp)
 		return
 	}
-	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+	// The plan-usage endpoint may omit Content-Type even when returning valid
+	// SSE. The parser below still requires valid events and response.completed.
+	if contentType := resp.Header.Get("Content-Type"); contentType != "" && !strings.HasPrefix(contentType, "text/event-stream") {
 		bridgeError(w, 502, "expected_event_stream")
 		return
 	}
@@ -361,6 +364,10 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	var event string
 	var data []string
+	// Plan-usage streams may leave response.completed.output empty. Preserve
+	// finalized items for atomic callers (connection tests and compaction).
+	items := make(map[int]json.RawMessage)
+	itemBytes := 0
 	process := func() bool {
 		if len(data) == 0 {
 			event = ""
@@ -368,8 +375,10 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 		}
 		payload := []byte(strings.Join(data, "\n"))
 		var frame struct {
-			Type     string          `json:"type"`
-			Response json.RawMessage `json:"response"`
+			Type        string          `json:"type"`
+			Response    json.RawMessage `json:"response"`
+			Item        json.RawMessage `json:"item"`
+			OutputIndex int             `json:"output_index"`
 		}
 		if json.Unmarshal(payload, &frame) != nil {
 			fail("invalid_event_stream")
@@ -389,7 +398,8 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 		}
 		if kind == "response.completed" {
 			var final struct {
-				Status string `json:"status"`
+				Status string            `json:"status"`
+				Output []json.RawMessage `json:"output"`
 			}
 			if json.Unmarshal(frame.Response, &final) != nil || final.Status != "completed" {
 				fail("invalid_completed_response")
@@ -400,10 +410,37 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 					return false
 				}
 			} else {
-				writeBridgeJSON(w, 200, json.RawMessage(frame.Response))
+				if len(final.Output) == 0 && len(items) > 0 {
+					indexes := make([]int, 0, len(items))
+					for index := range items {
+						indexes = append(indexes, index)
+					}
+					sort.Ints(indexes)
+					for _, index := range indexes {
+						final.Output = append(final.Output, items[index])
+					}
+					var response map[string]json.RawMessage
+					_ = json.Unmarshal(frame.Response, &response)
+					response["output"], _ = json.Marshal(final.Output)
+					writeBridgeJSON(w, 200, response)
+				} else {
+					writeBridgeJSON(w, 200, json.RawMessage(frame.Response))
+				}
 			}
 			completed = true
 			return false
+		}
+		if kind == "response.output_item.done" && !stream {
+			if len(frame.Item) == 0 || string(frame.Item) == "null" || frame.OutputIndex < 0 || frame.OutputIndex > 10000 {
+				fail("invalid_output_item")
+				return false
+			}
+			itemBytes += len(frame.Item) - len(items[frame.OutputIndex])
+			if itemBytes > maxBody {
+				fail("response_too_large")
+				return false
+			}
+			items[frame.OutputIndex] = frame.Item
 		}
 		// Only events the existing provider understands are forwarded. Metadata
 		// events do not commit HTTP 200 before a quota/auth error is known.

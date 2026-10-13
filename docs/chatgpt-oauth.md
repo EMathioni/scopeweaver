@@ -71,7 +71,7 @@ In ScopeWeaver's LLM settings, create a profile with those fields:
 | Setting | Value |
 | --- | --- |
 | Format | `openai-responses` |
-| Base URL | `http://127.0.0.1:8788/v1` |
+| Base URL | `http://127.0.0.1:8789/v1` |
 | API key | `api_key` from the generated profile JSON |
 | Model | Selected catalog `id` |
 | Streaming | Enabled (the bridge also supports atomic non-streaming callers) |
