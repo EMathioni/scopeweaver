@@ -307,3 +307,47 @@ func TestExpiredOAuthSessionIsDistinctFromWrongBridgeKey(t *testing.T) {
 		t.Fatalf("OAuth expiry must request sign-in without blaming the local key: %v", err)
 	}
 }
+
+func TestHTTPPolicyFailureOverridesRetryableStatus(t *testing.T) {
+	for _, code := range []string{"cyber_policy", "misalignment_policy_violation"} {
+		response := &http.Response{StatusCode: 502, Header: http.Header{"Retry-After": {"30"}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"error":{"code":%q}}`, code)))}
+		out := httptest.NewRecorder()
+		forwardHTTPError(out, response)
+		if out.Code != 403 || out.Header().Get("Retry-After") != "" || !strings.Contains(out.Body.String(), code) {
+			t.Fatalf("policy HTTP error still suggests recovery: status=%d headers=%v body=%s", out.Code, out.Header(), out.Body.String())
+		}
+	}
+}
+
+func TestCyberPolicyStreamFailureIsNotRetriedOrRoutedToBackup(t *testing.T) {
+	for _, stream := range []bool{true, false} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			var calls, backupCalls atomic.Int32
+			_, server := bridgeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				streamFrames(w, `{"type":"response.created"}`, `{"type":"response.failed","response":{"error":{"code":"cyber_policy","message":"private upstream diagnostic"}}}`)
+			})
+			// Use default SDK retries to prove HTTP 403 does not enter its 5xx retry ladder.
+			cfg := agent.ConfigFrom("openai-responses", "account-model", server.URL+"/v1", localTestKey, "")
+			provider, err := cfg.NewProvider()
+			if err != nil {
+				t.Fatal(err)
+			}
+			backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { backupCalls.Add(1); streamFrames(w, completedText) }))
+			defer backup.Close()
+			pool := llmpool.New([]*llmpool.Member{{ID: 1, Prov: provider, Rank: 2}, {ID: 2, Prov: providerForBridge(t, backup.URL), Rank: 1}}, nil)
+			if stream {
+				for _, e := range pool.Stream(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("fixture")}}) {
+					if e != nil {
+						err = e
+					}
+				}
+			} else {
+				_, _, _, err = pool.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("fixture")}})
+			}
+			if err == nil || !strings.Contains(err.Error(), "status 403") || !strings.Contains(err.Error(), "cyber_policy") || strings.Contains(err.Error(), "private") || calls.Load() != 1 || backupCalls.Load() != 0 {
+				t.Fatalf("policy block must propagate after one call without backup: %v calls=%d backup=%d", err, calls.Load(), backupCalls.Load())
+			}
+		})
+	}
+}

@@ -294,13 +294,17 @@ func failureCode(raw []byte) string {
 
 func failureStatus(code string) int {
 	switch code {
+	case "cyber_policy", "misalignment_policy_violation", "subscription_sharing_user_not_eligible", "subscription_sharing_route_not_supported", "chatpass_v2_scope_not_authorized", "chatpass_v2_invalid_authorization_context":
+		return 403
 	case "subscription_sharing_usage_limit_exceeded", "rate_limit_exceeded":
 		return 429
-	case "subscription_sharing_usage_unavailable":
-		return 403
+	case "subscription_sharing_usage_unavailable", "subscription_sharing_user_unavailable":
+		return 503
+	case "subscription_sharing_unsupported_capability":
+		return 400
 	case "insufficient_quota":
 		return 402
-	case "invalid_api_key", "invalid_token", "authentication_error":
+	case "invalid_api_key", "invalid_token", "authentication_error", "subscription_sharing_invalid_user":
 		return 401
 	default:
 		return 502
@@ -310,13 +314,18 @@ func failureStatus(code string) int {
 func forwardHTTPError(w http.ResponseWriter, resp *http.Response) {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	status := resp.StatusCode
+	code := failureCode(raw)
+	policyBlocked := code == "cyber_policy" || code == "misalignment_policy_violation"
 	if status < 400 || status > 599 {
 		status = 502
 	}
-	if retry := resp.Header.Get("Retry-After"); retry != "" {
+	if policyBlocked {
+		status = 403
+	}
+	if retry := resp.Header.Get("Retry-After"); retry != "" && !policyBlocked {
 		w.Header().Set("Retry-After", retry)
 	}
-	bridgeError(w, status, failureCode(raw))
+	bridgeError(w, status, code)
 }
 
 func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {

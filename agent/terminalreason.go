@@ -3,10 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/Autumn-27/artex/locale"
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/llmpool"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/harness"
 )
 
@@ -45,10 +46,20 @@ var reasonHint = map[harness.TerminalReason]string{
 	harness.ReasonAbortedTools:      "Run cancelled during tool execution",
 }
 
+const providerPolicyHint = "Provider policy blocked this request. Automatic retries and model failover are disabled for this error. Review the task scope and provider access before attempting again"
+
+func init() {
+	locale.Register(providerPolicyHint, providerPolicyHint, "공급자 정책이 이 요청을 차단했습니다. 이 오류에 대한 자동 재시도와 모델 장애 전환은 비활성화됩니다. 다시 시도하기 전에 작업 범위와 공급자 접근 권한을 검토하세요")
+}
+
 // terminalText renders a terminal event with no final text into a compact summary
 // and a Markdown detail block.
 func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (string, string) {
 	reason := term.Reason
+	hint := terminalReasonHint(reason, locale.FromContext(ctx))
+	if reason == harness.ReasonModelError && llmpool.IsPolicyFailure(term.Err) {
+		hint = locale.Text(locale.FromContext(ctx), providerPolicyHint)
+	}
 	aborted := reason == harness.ReasonAbortedStreaming || reason == harness.ReasonAbortedTools
 	// Prompt may return ctx.Err directly without a terminal event. Preserve the
 	// cancellation cause instead of falling back to an empty/unknown terminal reason.
@@ -73,7 +84,6 @@ func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (st
 	} else if reason == harness.ReasonMaxTurns || reason == harness.ReasonTimeout {
 		sum = locale.Text(locale.FromContext(ctx), "(Run budget limit reached (") + string(reason) + locale.Text(locale.FromContext(ctx), "); facts saved during wrap-up") + progressSuffix(term, tr, locale.FromContext(ctx)) + locale.Text(locale.FromContext(ctx), "; no text summary)")
 	} else {
-		hint := terminalReasonHint(reason, locale.FromContext(ctx))
 		sum = locale.Text(locale.FromContext(ctx), "(No text summary; terminal state ") + terminalReasonLabel(reason) + ": " + firstLine(hint, 80) + ")"
 	}
 
@@ -81,7 +91,7 @@ func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (st
 	b.WriteString(sum)
 	b.WriteString("\n\n")
 	displayReason := terminalReasonLabel(reason)
-	fmt.Fprintf(&b, locale.Text(locale.FromContext(ctx), "- **Terminal state**: `%s` - %s\n"), displayReason, terminalReasonHint(reason, locale.FromContext(ctx)))
+	fmt.Fprintf(&b, locale.Text(locale.FromContext(ctx), "- **Terminal state**: `%s` - %s\n"), displayReason, hint)
 	if aborted {
 		code, _, why, ok := AbortReason(ctx)
 		if ok {

@@ -153,6 +153,20 @@ WSL 자격 증명 디렉터리가 아닌 Windows의 비공개 디렉터리를 �
 - 로컬/open-source 사용을 대상으로 합니다. 상용/원격 서비스는 OpenAI의 별도
   온보딩 및 제품 요구 사항을 따라야 합니다.
 
+## 공급자 정책 차단
+
+`cyber_policy`와 `misalignment_policy_violation`은 공급자의 안전 장치가 요청을
+차단했다는 뜻입니다. 브리지는 코드를 유지하고 HTTP 403으로 전달합니다.
+ScopeWeaver는 이러한 오류에 대해 자동 재시도, worker 재시도 및 다른 모델로의
+장애 전환을 중단합니다. 이전 브리지의 HTTP 502 오류에도 적용됩니다.
+일반적인 일시적 오류는 기존 복구 동작을 유지합니다.
+
+OAuth 로그인 성공이나 모델 목록 표시는 모든 사이버 보안 작업의 권한을 보장하지
+않습니다. worker 추적, 승인된 작업 범위 및 공급자 접근 권한을 검토하고 오탐이
+의심되면 OpenAI 지원에 문의하세요. 이 통합은 사이버 보안 프로그램의 접근 권한을
+부여하거나 공급자 안전 장치를 변경하지 않습니다. 공식
+[사이버 보안 안전 검사](https://developers.openai.com/api/docs/guides/safety-checks/cybersecurity)를 참고하세요.
+
 ## 검증
 
 ```bash

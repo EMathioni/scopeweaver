@@ -170,6 +170,21 @@ directory, and ensure the backend can reach the chosen bridge listener.
 - This integration targets local/open-source use. Commercial/remote hosted use
   must follow OpenAI's applicable onboarding and product requirements.
 
+## Provider policy blocks
+
+`cyber_policy` and `misalignment_policy_violation` mean the provider's safeguards
+blocked the request. The bridge maps these failures to HTTP 403 and preserves
+the code. ScopeWeaver stops automatic retries, worker retries and model failover
+for these errors, including errors from an older bridge that reported HTTP 502.
+Ordinary transient failures retain their existing recovery behavior.
+
+Successful OAuth login and model visibility do not establish permission for
+every cybersecurity operation. Review the worker trace, authorized task scope
+and applicable provider access; contact OpenAI support for a possible false
+positive. This integration does not grant access to a cybersecurity program or
+change provider safeguards. See the official
+[cybersecurity safety checks](https://developers.openai.com/api/docs/guides/safety-checks/cybersecurity).
+
 ## Validation
 
 ```bash

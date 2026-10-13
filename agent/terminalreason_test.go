@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 )
@@ -22,6 +23,16 @@ func TestReasonHintCoversEveryTerminalReason(t *testing.T) {
 	for _, reason := range all {
 		if strings.TrimSpace(reasonHint[reason]) == "" {
 			t.Errorf("terminal reason %q has no explanation", reason)
+		}
+	}
+}
+
+func TestTerminalPolicyFailureExplainsRequiredReview(t *testing.T) {
+	for _, lang := range []locale.Lang{locale.En, locale.Ko} {
+		ctx := locale.WithLang(context.Background(), lang)
+		_, detail := terminalText(ctx, &harness.Terminal{Reason: harness.ReasonModelError, Err: errors.New("openai-responses: status 502 cyber_policy")}, &runTrace{})
+		if !strings.Contains(detail, locale.Text(lang, providerPolicyHint)) || !strings.Contains(detail, "cyber_policy") {
+			t.Fatalf("policy diagnostic missing in %s: %s", lang, detail)
 		}
 	}
 }
