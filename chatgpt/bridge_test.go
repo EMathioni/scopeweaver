@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/llmpool"
@@ -289,5 +290,20 @@ func TestLeanCompletedResponseReconstructsFinalOutput(t *testing.T) {
 	msg, _, usage, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("test")}})
 	if err != nil || msg.Text() != "OK" || len(msg.ToolUses()) != 1 || msg.ToolUses()[0].ID != "call-1" || usage.OutputTokens != 4 || msg.Content[0].Type != llm.BlockText {
 		t.Fatalf("lean final response lost output/order/usage: %+v %v", msg, err)
+	}
+}
+
+func TestExpiredOAuthSessionIsDistinctFromWrongBridgeKey(t *testing.T) {
+	f, s := bridgeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("invalid OAuth session must not reach inference")
+	})
+	f.mode = "revoked"
+	f.client.mu.Lock()
+	f.client.credentials.ExpiresAt = time.Now().Add(-time.Minute)
+	f.client.mu.Unlock()
+	p := providerForBridge(t, s.URL)
+	_, _, _, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("test")}})
+	if err == nil || !strings.Contains(err.Error(), "chatgpt_sign_in_required") || strings.Contains(err.Error(), "invalid_bridge_key") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("OAuth expiry must request sign-in without blaming the local key: %v", err)
 	}
 }

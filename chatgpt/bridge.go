@@ -129,7 +129,7 @@ func (b *Bridge) request(ctx context.Context, method, path string, body []byte) 
 func (b *Bridge) models(w http.ResponseWriter, r *http.Request) {
 	resp, err := b.request(r.Context(), "GET", "/models", nil)
 	if err != nil {
-		bridgeError(w, requestErrorStatus(err), "chatgpt_unavailable")
+		bridgeError(w, requestErrorStatus(err), requestErrorCode(err))
 		return
 	}
 	defer resp.Body.Close()
@@ -169,6 +169,17 @@ func requestErrorStatus(err error) int {
 		return 401
 	}
 	return 503
+}
+
+func requestErrorCode(err error) string {
+	if requestErrorStatus(err) == http.StatusUnauthorized {
+		return "chatgpt_sign_in_required"
+	}
+	var oauth *OAuthError
+	if errors.As(err, &oauth) {
+		return "chatgpt_oauth_" + safeCode(oauth.Code)
+	}
+	return "chatgpt_unavailable"
 }
 
 // adaptRequest preserves the host's messages and function names. The SIWC
@@ -322,7 +333,7 @@ func (b *Bridge) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := b.request(r.Context(), "POST", "/responses", body)
 	if err != nil {
-		bridgeError(w, requestErrorStatus(err), "chatgpt_unavailable")
+		bridgeError(w, requestErrorStatus(err), requestErrorCode(err))
 		return
 	}
 	defer resp.Body.Close()
