@@ -229,7 +229,7 @@ func statusOf(err error) int {
 // pollute the run's termination diagnosis. Never on 400 either: a malformed or
 // over-long request fails identically everywhere.
 func shouldFailover(ctx context.Context, err error) bool {
-	if err == nil {
+	if err == nil || IsPolicyFailure(err) {
 		return false
 	}
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

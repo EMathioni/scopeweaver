@@ -15,6 +15,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
@@ -83,7 +84,7 @@ func isTaskLLMChainExhausted(err error) bool {
 // network failure, or 5xx does not rotate providers; the response must explicitly
 // identify quota, credits, billing balance, or payment exhaustion.
 func isQuotaExhaustedError(err error) bool {
-	return err != nil && agent.IsQuotaExhaustedMessage(err.Error())
+	return err != nil && !llmpool.IsPolicyFailure(err) && agent.IsQuotaExhaustedMessage(err.Error())
 }
 
 type taskLLMSelection struct {
@@ -430,7 +431,7 @@ func sameProviderRetryPolicy(r agent.RetryConfig) (retries int, backoff func(int
 // - Excessive context: replaying cannot help; use the harness's reactive compaction fallback.
 // - Deterministic 4xx rejection (400/401/403/404/422): the same request remains invalid.
 func isRetryableStreamError(err error) bool {
-	if err == nil {
+	if err == nil || llmpool.IsPolicyFailure(err) {
 		return false
 	}
 	if isQuotaExhaustedError(err) {

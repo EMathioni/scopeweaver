@@ -23,6 +23,39 @@ type scriptedLLMProvider struct {
 	calls  int
 }
 
+func TestPolicyBlockDoesNotRetryOrAdvanceTaskProfiles(t *testing.T) {
+	defer withZeroRetryBackoff()()
+	for _, stream := range []bool{true, false} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			blocked := errors.New("openai-responses: ChatGPT bridge: status 502 cyber_policy")
+			provider := &scriptedLLMProvider{err: blocked}
+			hooks := taskLLMStreamHooks{
+				current: func() (taskLLMSelection, error) { return taskLLMSelection{profileID: 7, provider: provider}, nil },
+				exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
+					t.Fatal("policy block advanced the task chain")
+					return db.TaskLLMTransition{}, nil
+				},
+			}
+			var err error
+			if stream {
+				for _, e := range streamTaskLLM(context.Background(), "policy-test", llm.CompletionRequest{}, hooks) {
+					if e != nil {
+						err = e
+					}
+				}
+			} else {
+				_, _, _, err = completeTaskLLM(context.Background(), "policy-test", llm.CompletionRequest{}, hooks)
+			}
+			if !errors.Is(err, blocked) || provider.calls != 1 {
+				t.Fatalf("policy block retried or lost: err=%v calls=%d", err, provider.calls)
+			}
+			if retryableWorkerModelError(harness.ReasonModelError, err) {
+				t.Fatal("policy block allowed whole-intent retry")
+			}
+		})
+	}
+}
+
 func (p *scriptedLLMProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
 	return func(yield func(llm.StreamEvent, error) bool) {
 		p.calls++
