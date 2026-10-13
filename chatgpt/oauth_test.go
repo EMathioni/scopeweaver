@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/locale"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -93,6 +95,14 @@ func newOAuthFixture(t *testing.T) *oauthFixture {
 			}
 			if f.mode == "bad_issuer" {
 				claims.Issuer = "https://wrong.invalid"
+			}
+			if f.mode == "small_clock_skew" {
+				claims.IssuedAt = jwt.NewNumericDate(time.Now().Add(5 * time.Second))
+				claims.NotBefore = claims.IssuedAt
+			}
+			if f.mode == "large_clock_skew" {
+				claims.IssuedAt = jwt.NewNumericDate(time.Now().Add(2 * time.Minute))
+				claims.NotBefore = claims.IssuedAt
 			}
 			token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 			token.Header["kid"] = "test"
@@ -366,5 +376,39 @@ func TestPrivateStoreLockAndAccounts(t *testing.T) {
 		if _, err := s.Load("one"); err == nil {
 			t.Fatal("world-readable credentials accepted")
 		}
+	}
+}
+
+func TestOIDCValidationToleratesSmallClockDifferences(t *testing.T) {
+	for _, mode := range []string{"small_clock_skew", "large_clock_skew"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newOAuthFixture(t)
+			a, _ := f.begin(t)
+			f.mode = mode
+			err := a.Finish(context.Background(), f.callback(a))
+			if (err == nil) != (mode == "small_clock_skew") {
+				t.Fatalf("unexpected result for %s: %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestPublicLoginErrorsNeverEchoProviderOrCallbackSecrets(t *testing.T) {
+	const secret = "private-authorization-code"
+	for _, err := range []error{
+		fmt.Errorf("callback contained %s", secret),
+		&OAuthError{Status: 400, Code: secret},
+	} {
+		for _, lang := range []locale.Lang{locale.En, locale.Ko} {
+			if strings.Contains(PublicLoginError(err, lang), secret) {
+				t.Fatal("public login error leaked a secret")
+			}
+		}
+	}
+	if text := PublicLoginError(&OAuthError{Status: 400, Code: "invalid_grant"}, locale.En); !strings.Contains(text, "invalid_grant") {
+		t.Fatal("safe OAuth diagnostic lost")
+	}
+	if text := PublicLoginError(locale.NewError("ChatGPT ID token validation failed: nonce mismatch"), locale.En); !strings.Contains(text, "nonce mismatch") {
+		t.Fatal("safe identity diagnostic lost")
 	}
 }

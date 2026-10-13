@@ -49,6 +49,11 @@ start login again. Models, permissions, account eligibility and subscription
 limits are determined by OpenAI; having a subscription does not guarantee that
 this flow or a particular model is available.
 
+The callback displays a controlled diagnostic on failure, without echoing codes
+or tokens. ID-token time checks allow 30 seconds of clock skew; signature,
+issuer, audience, subject and nonce validation remain enforced. Always use the
+fresh authorization URL printed by the current login invocation.
+
 ## Add a profile and run the bridge
 
 Before starting the bridge, inspect the account and its actual model catalog:
@@ -76,6 +81,12 @@ In ScopeWeaver's LLM settings, create a profile with those fields:
 | Model | Selected catalog `id` |
 | Streaming | Enabled (the bridge also supports atomic non-streaming callers) |
 | Maximum output tokens | `0` (the OAuth route does not accept an output cap) |
+
+Additional model/effort profiles use the same local bridge key. A blank API-key
+field preserves the stored key only when editing an existing profile; a new
+profile does not inherit it. The key is available in the private
+`bridge-key.json` file in the credential directory. Do not paste OAuth tokens
+into the profile's API-key field.
 
 Now start the bridge and leave it running:
 

@@ -370,11 +370,54 @@ func (c *Client) validateIdentity(ctx context.Context, raw, clientID, nonce stri
 			return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(exponent)}, nil
 		}
 		return nil, locale.NewError("OpenAI signing key was not found")
-	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(c.issuer), jwt.WithAudience(clientID), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
-	if err != nil || claims.Subject == "" || (nonce != "" && subtle.ConstantTimeCompare([]byte(claims.Nonce), []byte(nonce)) != 1) {
-		return identityClaims{}, locale.NewError("ChatGPT ID token validation failed")
+	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(c.issuer), jwt.WithAudience(clientID), jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithLeeway(30*time.Second))
+	if err != nil {
+		return identityClaims{}, identityValidationError(err)
+	}
+	if claims.Subject == "" {
+		return identityClaims{}, locale.NewError("ChatGPT ID token validation failed: missing subject")
+	}
+	if nonce != "" && subtle.ConstantTimeCompare([]byte(claims.Nonce), []byte(nonce)) != 1 {
+		return identityClaims{}, locale.NewError("ChatGPT ID token validation failed: nonce mismatch")
 	}
 	return claims, nil
+}
+
+func identityValidationError(err error) error {
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return locale.NewError("ChatGPT ID token validation failed: token expired")
+	case errors.Is(err, jwt.ErrTokenInvalidAudience):
+		return locale.NewError("ChatGPT ID token validation failed: audience mismatch")
+	case errors.Is(err, jwt.ErrTokenInvalidIssuer):
+		return locale.NewError("ChatGPT ID token validation failed: issuer mismatch")
+	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+		return locale.NewError("ChatGPT ID token validation failed: invalid signature")
+	case errors.Is(err, jwt.ErrTokenNotValidYet), errors.Is(err, jwt.ErrTokenUsedBeforeIssued):
+		return locale.NewError("ChatGPT ID token validation failed: token not yet valid")
+	case errors.Is(err, jwt.ErrTokenUnverifiable):
+		return locale.NewError("ChatGPT ID token validation failed: signing key unavailable")
+	default:
+		return locale.NewError("ChatGPT ID token validation failed")
+	}
+}
+
+// PublicLoginError displays only controlled catalog messages or sanitized OAuth
+// codes. Token values, callback URLs and provider response bodies never appear.
+func PublicLoginError(err error, lang locale.Lang) string {
+	var oauth *OAuthError
+	if errors.As(err, &oauth) {
+		code := "oauth_error"
+		switch oauth.Code {
+		case "invalid_grant", "invalid_client", "invalid_scope", "access_denied", "temporarily_unavailable", "slow_down":
+			code = oauth.Code
+		}
+		return (&OAuthError{Code: code, Status: oauth.Status}).MessageForLanguage(lang)
+	}
+	if _, known := locale.Lookup(locale.En, err.Error()); known {
+		return locale.ErrorMessage(lang, err)
+	}
+	return locale.Text(lang, "ChatGPT sign-in failed; inspect the terminal error")
 }
 
 // Account returns only non-secret account information.

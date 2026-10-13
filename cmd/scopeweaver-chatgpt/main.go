@@ -113,7 +113,7 @@ func run(ctx context.Context, args []string) (result error) {
 			}
 			err := a.Finish(loginCtx, redirect+"?"+r.URL.RawQuery)
 			if err != nil {
-				http.Error(w, "Sign-in failed; return to the terminal / 로그인 실패; 터미널로 돌아가세요", 400)
+				http.Error(w, "Sign-in failed; return to the terminal / 로그인 실패; 터미널로 돌아가세요\n"+chatgpt.PublicLoginError(err, locale.Lang(*lang)), 400)
 			} else {
 				fmt.Fprintln(w, message(*lang, "Signed in. You can close this tab.", "로그인되었습니다. 이 탭을 닫아도 됩니다."))
 			}
